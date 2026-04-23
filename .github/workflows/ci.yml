@@ -298,7 +298,7 @@ jobs:
 
       - name: Perform scripted rolling update
         env:
-          OLD_IMAGE: localhost:5000/job-api:latest
+          OLD_IMAGE: localhost:5000/job-api:${{ github.sha }}
           NEW_IMAGE: localhost:5000/job-api:${{ github.sha }}
           REDIS_IMAGE: redis:7.2-alpine
           HEALTH_TIMEOUT_SECONDS: "60"
