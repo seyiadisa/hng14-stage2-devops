@@ -64,5 +64,4 @@ services:
 
 networks:
   app_net:
-    name: job-app-net
-    internal: true
+    name: ${APP_NETWORK_NAME}
