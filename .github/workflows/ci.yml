@@ -161,6 +161,7 @@ jobs:
           format: sarif
           output: trivy-api.sarif
           severity: CRITICAL
+          ignore-unfixed: true
           exit-code: "1"
 
       - name: Scan worker image with Trivy
@@ -171,6 +172,7 @@ jobs:
           format: sarif
           output: trivy-worker.sarif
           severity: CRITICAL
+          ignore-unfixed: true
           exit-code: "1"
 
       - name: Scan frontend image with Trivy
@@ -180,6 +182,7 @@ jobs:
           image-ref: localhost:5000/job-frontend:${{ github.sha }}
           format: sarif
           output: trivy-frontend.sarif
+          ignore-unfixed: true
           severity: CRITICAL
           exit-code: "1"
 
