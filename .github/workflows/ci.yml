@@ -1,0 +1,297 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python lint dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8
+
+      - name: Run flake8
+        run: flake8 api worker
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install
+
+      - name: Run eslint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Run hadolint for API image
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: api/Dockerfile
+
+      - name: Run hadolint for worker image
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: worker/Dockerfile
+
+      - name: Run hadolint for frontend image
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: frontend/Dockerfile
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install API test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r api/requirements-dev.txt
+
+      - name: Run API unit tests with coverage
+        env:
+          PYTHONPATH: .
+        run: |
+          pytest api/tests --cov=api --cov-report=term-missing --cov-report=xml:coverage.xml
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-coverage-report
+          path: coverage.xml
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: test
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Build and push API image
+        run: |
+          docker build -t localhost:5000/job-api:${GITHUB_SHA} -t localhost:5000/job-api:latest ./api
+          docker push localhost:5000/job-api:${GITHUB_SHA}
+          docker push localhost:5000/job-api:latest
+
+      - name: Build and push worker image
+        run: |
+          docker build -t localhost:5000/job-worker:${GITHUB_SHA} -t localhost:5000/job-worker:latest ./worker
+          docker push localhost:5000/job-worker:${GITHUB_SHA}
+          docker push localhost:5000/job-worker:latest
+
+      - name: Build and push frontend image
+        run: |
+          docker build -t localhost:5000/job-frontend:${GITHUB_SHA} -t localhost:5000/job-frontend:latest ./frontend
+          docker push localhost:5000/job-frontend:${GITHUB_SHA}
+          docker push localhost:5000/job-frontend:latest
+
+      - name: Save built images as artifacts
+        run: |
+          mkdir -p image-artifacts
+          docker save localhost:5000/job-api:${GITHUB_SHA} | gzip > image-artifacts/job-api.tar.gz
+          docker save localhost:5000/job-worker:${GITHUB_SHA} | gzip > image-artifacts/job-worker.tar.gz
+          docker save localhost:5000/job-frontend:${GITHUB_SHA} | gzip > image-artifacts/job-frontend.tar.gz
+
+      - name: Upload built image archives
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-images
+          path: image-artifacts/*.tar.gz
+
+  security_scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download built image archives
+        uses: actions/download-artifact@v4
+        with:
+          name: built-images
+          path: image-artifacts
+
+      - name: Load built images
+        run: |
+          gunzip -c image-artifacts/job-api.tar.gz | docker load
+          gunzip -c image-artifacts/job-worker.tar.gz | docker load
+          gunzip -c image-artifacts/job-frontend.tar.gz | docker load
+
+      - name: Scan API image with Trivy
+        id: trivy_api
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: localhost:5000/job-api:${{ github.sha }}
+          format: sarif
+          output: trivy-api.sarif
+          severity: CRITICAL
+          exit-code: "1"
+
+      - name: Scan worker image with Trivy
+        id: trivy_worker
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: localhost:5000/job-worker:${{ github.sha }}
+          format: sarif
+          output: trivy-worker.sarif
+          severity: CRITICAL
+          exit-code: "1"
+
+      - name: Scan frontend image with Trivy
+        id: trivy_frontend
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: localhost:5000/job-frontend:${{ github.sha }}
+          format: sarif
+          output: trivy-frontend.sarif
+          severity: CRITICAL
+          exit-code: "1"
+
+      - name: Upload Trivy SARIF artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-sarif
+          if-no-files-found: warn
+          path: |
+            trivy-api.sarif
+            trivy-worker.sarif
+            trivy-frontend.sarif
+
+      - name: Fail on critical vulnerabilities
+        if: always()
+        run: |
+          if [ "${{ steps.trivy_api.outcome }}" != "success" ] || [ "${{ steps.trivy_worker.outcome }}" != "success" ] || [ "${{ steps.trivy_frontend.outcome }}" != "success" ]; then
+            echo "Trivy found CRITICAL vulnerabilities."
+            exit 1
+          fi
+
+  integration_test:
+    name: Integration Test
+    runs-on: ubuntu-latest
+    needs: security_scan
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download built image archives
+        uses: actions/download-artifact@v4
+        with:
+          name: built-images
+          path: image-artifacts
+
+      - name: Load built images
+        run: |
+          gunzip -c image-artifacts/job-api.tar.gz | docker load
+          gunzip -c image-artifacts/job-worker.tar.gz | docker load
+          gunzip -c image-artifacts/job-frontend.tar.gz | docker load
+
+      - name: Create integration environment file
+        run: |
+          cat <<EOF > .env.ci
+          IMAGE_TAG=${GITHUB_SHA}
+          APP_NETWORK_NAME=job-app-net-ci
+          REDIS_IMAGE=redis:7.2-alpine
+          REDIS_HOST=redis
+          REDIS_PORT=6379
+          REDIS_HEALTHCHECK_INTERVAL=10s
+          REDIS_HEALTHCHECK_TIMEOUT=3s
+          REDIS_HEALTHCHECK_RETRIES=5
+          REDIS_HEALTHCHECK_START_PERIOD=5s
+          API_IMAGE_NAME=localhost:5000/job-api
+          API_PORT=8000
+          API_HOST_PORT=8000
+          WORKER_IMAGE_NAME=localhost:5000/job-worker
+          FRONTEND_IMAGE_NAME=localhost:5000/job-frontend
+          FRONTEND_HOST=0.0.0.0
+          FRONTEND_PORT=3000
+          FRONTEND_HOST_PORT=3000
+          FRONTEND_API_URL=http://api:8000
+          EOF
+
+      - name: Start the full stack
+        run: docker compose --env-file .env.ci up -d --no-build
+
+      - name: Wait for services to become healthy
+        run: docker compose --env-file .env.ci up -d --wait --wait-timeout 120 --no-build
+
+      - name: Run end-to-end job submission test
+        env:
+          FRONTEND_URL: http://127.0.0.1:3000
+          INTEGRATION_TIMEOUT_SECONDS: "60"
+          INTEGRATION_POLL_INTERVAL_SECONDS: "2"
+        run: python scripts/integration_test.py
+
+      - name: Tear down integration stack
+        if: always()
+        run: docker compose --env-file .env.ci down -v
+
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    needs: integration_test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download built image archives
+        uses: actions/download-artifact@v4
+        with:
+          name: built-images
+          path: image-artifacts
+
+      - name: Load built images
+        run: |
+          gunzip -c image-artifacts/job-api.tar.gz | docker load
+          gunzip -c image-artifacts/job-worker.tar.gz | docker load
+          gunzip -c image-artifacts/job-frontend.tar.gz | docker load
+
+      - name: Perform scripted rolling update
+        env:
+          OLD_IMAGE: localhost:5000/job-api:latest
+          NEW_IMAGE: localhost:5000/job-api:${{ github.sha }}
+          REDIS_IMAGE: redis:7.2-alpine
+          HEALTH_TIMEOUT_SECONDS: "60"
+        run: bash scripts/rolling_deploy.sh
