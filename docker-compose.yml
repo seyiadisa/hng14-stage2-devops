@@ -1,0 +1,68 @@
+services:
+  redis:
+    image: ${REDIS_IMAGE}
+    restart: unless-stopped
+    networks:
+      - app_net
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: ${REDIS_HEALTHCHECK_INTERVAL}
+      timeout: ${REDIS_HEALTHCHECK_TIMEOUT}
+      retries: ${REDIS_HEALTHCHECK_RETRIES}
+      start_period: ${REDIS_HEALTHCHECK_START_PERIOD}
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    image: ${API_IMAGE_NAME}:${IMAGE_TAG}
+    restart: unless-stopped
+    environment:
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+      API_PORT: ${API_PORT}
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "${API_HOST_PORT}:${API_PORT}"
+    networks:
+      - app_net
+
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile
+    image: ${WORKER_IMAGE_NAME}:${IMAGE_TAG}
+    restart: unless-stopped
+    environment:
+      REDIS_HOST: ${REDIS_HOST}
+      REDIS_PORT: ${REDIS_PORT}
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - app_net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: ${FRONTEND_IMAGE_NAME}:${IMAGE_TAG}
+    restart: unless-stopped
+    environment:
+      API_URL: ${FRONTEND_API_URL}
+      PORT: ${FRONTEND_PORT}
+      HOST: ${FRONTEND_HOST}
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_HOST_PORT}:${FRONTEND_PORT}"
+    networks:
+      - app_net
+
+networks:
+  app_net:
+    name: job-app-net
+    internal: true
