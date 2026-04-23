@@ -1,4 +1,4 @@
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 
 ENV VENV_PATH=/opt/venv \
     PIP_NO_CACHE_DIR=1
@@ -12,7 +12,7 @@ COPY requirements.txt .
 RUN pip install pip==25.0.1 && pip install --requirement requirements.txt
 
 
-FROM python:3.12-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 ENV VENV_PATH=/opt/venv \
     PYTHONDONTWRITEBYTECODE=1 \
