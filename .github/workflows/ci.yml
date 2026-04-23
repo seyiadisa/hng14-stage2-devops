@@ -136,56 +136,72 @@ jobs:
     name: Security Scan
     runs-on: ubuntu-latest
     needs: build
-
+  
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
-
+  
       - name: Download built image archives
         uses: actions/download-artifact@v4
         with:
           name: built-images
           path: image-artifacts
-
+  
       - name: Load built images
         run: |
           gunzip -c image-artifacts/job-api.tar.gz | docker load
           gunzip -c image-artifacts/job-worker.tar.gz | docker load
           gunzip -c image-artifacts/job-frontend.tar.gz | docker load
-
+  
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin v0.70.0
+  
+      - name: Show CRITICAL findings in table format
+        run: |
+          echo "=== API image ==="
+          trivy image --severity CRITICAL --ignore-unfixed --format table --no-progress localhost:5000/job-api:${{ github.sha }} || true
+  
+          echo "=== Worker image ==="
+          trivy image --severity CRITICAL --ignore-unfixed --format table --no-progress localhost:5000/job-worker:${{ github.sha }} || true
+  
+          echo "=== Frontend image ==="
+          trivy image --severity CRITICAL --ignore-unfixed --format table --no-progress localhost:5000/job-frontend:${{ github.sha }} || true
+  
       - name: Scan API image with Trivy
-        id: trivy_api
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: localhost:5000/job-api:${{ github.sha }}
-          format: sarif
-          output: trivy-api.sarif
-          severity: CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
-
+        run: |
+          trivy image \
+            --severity CRITICAL \
+            --ignore-unfixed \
+            --format sarif \
+            --output trivy-api.sarif \
+            --exit-code 1 \
+            --no-progress \
+            localhost:5000/job-api:${{ github.sha }}
+  
       - name: Scan worker image with Trivy
-        id: trivy_worker
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: localhost:5000/job-worker:${{ github.sha }}
-          format: sarif
-          output: trivy-worker.sarif
-          severity: CRITICAL
-          ignore-unfixed: true
-          exit-code: "1"
-
+        run: |
+          trivy image \
+            --severity CRITICAL \
+            --ignore-unfixed \
+            --format sarif \
+            --output trivy-worker.sarif \
+            --exit-code 1 \
+            --no-progress \
+            localhost:5000/job-worker:${{ github.sha }}
+  
       - name: Scan frontend image with Trivy
-        id: trivy_frontend
-        uses: aquasecurity/trivy-action@v0.36.0
-        with:
-          image-ref: localhost:5000/job-frontend:${{ github.sha }}
-          format: sarif
-          output: trivy-frontend.sarif
-          ignore-unfixed: true
-          severity: CRITICAL
-          exit-code: "1"
-
+        run: |
+          trivy image \
+            --severity CRITICAL \
+            --ignore-unfixed \
+            --format sarif \
+            --output trivy-frontend.sarif \
+            --exit-code 1 \
+            --no-progress \
+            localhost:5000/job-frontend:${{ github.sha }}
+  
       - name: Upload Trivy SARIF artifacts
         if: always()
         uses: actions/upload-artifact@v4
