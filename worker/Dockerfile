@@ -9,7 +9,7 @@ RUN python -m venv "${VENV_PATH}"
 ENV PATH="${VENV_PATH}/bin:${PATH}"
 
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install pip==25.0.1 && pip install --requirement requirements.txt
 
 
 FROM python:3.12-slim AS runtime

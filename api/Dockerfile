@@ -9,7 +9,7 @@ RUN python -m venv "${VENV_PATH}"
 ENV PATH="${VENV_PATH}/bin:${PATH}"
 
 COPY requirements.txt .
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install pip==25.0.1 && pip install --requirement requirements.txt
 
 
 FROM python:3.12-slim AS runtime
@@ -36,4 +36,3 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 response=urllib.request.urlopen(url, timeout=3); sys.exit(0 if response.status == 200 else 1)"
 
 CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${API_PORT:-8000}"]
-
