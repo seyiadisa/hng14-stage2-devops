@@ -11,6 +11,8 @@ OLD_IMAGE="${OLD_IMAGE:?OLD_IMAGE is required}"
 NEW_IMAGE="${NEW_IMAGE:?NEW_IMAGE is required}"
 HEALTH_TIMEOUT_SECONDS="${HEALTH_TIMEOUT_SECONDS:-60}"
 
+docker rm -f "${REDIS_CONTAINER_NAME}" "${OLD_CONTAINER_NAME}" "${NEW_CONTAINER_NAME}" "${LIVE_CONTAINER_NAME}" >/dev/null 2>&1 || true
+
 wait_for_health() {
   local container_name="$1"
   local timeout_seconds="$2"
